@@ -59,7 +59,7 @@ def make_x_micro(dick):
     return dick
 
 def get_ind(dick,key,pos):
-    'get the index of the input position for a specific key, as they are not all equally spaced, also accounts for the array not starting at 0'
+    'get the index of the input position for a specific key, as they are not all equally spaced, also accounts for the array not starting at 0, NOTE: pos [micrometers]'
     dx = dick[key][0][1] - dick[key][0][0]
     dist = pos - dick[key][0][0]
     ind = int(dist//dx)
