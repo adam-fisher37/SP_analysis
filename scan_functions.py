@@ -3,6 +3,7 @@ import os
 import re
 import fnmatch as fm
 import scipy.optimize as opt
+import scipy.special as spec
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 mpl.rc('xtick', direction='in', top=True)
@@ -26,7 +27,7 @@ def scan_dict(dick,path,wc='*.txt',skips=21,cols=(0,1),bad_bois=False):
     #load the data and put into the dict
     # have mutiple sets that need to be flipped
     if (hasattr(bad_bois,'T')):
-        assert(bad_bois.dtype=='<U4')
+        assert(isinstance(bad_bois,np.ndarray))
         for fname in os.listdir(path):
             if fm.fnmatch(fname,wc):
                 dick[fname.strip(wc.strip('*'))] = np.loadtxt(path+fname,skiprows=skips,usecols=cols,unpack=True)
@@ -152,10 +153,10 @@ def proj(dick,key,xf,xi=None):
 def height(dick,key,xf_a,xi_b,xf_b,xi_a=None,result=False):
     '''
     returns the difference in height btwn the two materials for a specific run along with error. does this by taking data from xi_a to xi_b which is left of the jump and averages that height and takes that difference from the averaged height from (xf_a,xf_b). you will need to look at this data beforehand to know where the positions are that you want to use. 
-    (i guess theoretically you wouldnt need to )
+    NOTE: currently can take inputs from rem or adj keys now BUT can no longer accept raw data key, this is now on you to make sure is correct
     inputs:
     dick - dictionary - dict from which you are working from
-    key - str - data set you want to get the height from, NOTE you should have run proj for this set but just call the key 's#t#', hopefully should be able to handle it as long as it has that part in there, perfer if its: 's#t#_adj'
+    key - str - data set you want to get the height from, NOTE you should have run proj and/or for this set but just call the key 's#t#', hopefully should be able to handle it as long as it has that part in there, perfer if its: 's#t#_adj'
     xi_a - float, default None - averages the glass height from here to xf_a, defaults to the start of the horziontal coords
     xf_a - float - end of range of coords to avg the glass height for [microns]
     xi_b - float - average the height of the sample (al2o3, etc.) from this coord to xf_b, start after the jump
@@ -166,6 +167,9 @@ def height(dick,key,xf_a,xi_b,xf_b,xi_a=None,result=False):
     also shows a plot of the whole run, with a horz line where the height is
     and then adds the height and std to a new key named: 's#t#_h'
     '''
+    # makes sure you are working in either adjusted or removed dataset
+    if (re.search('adj|rem',key)==None):
+    	raise Exception('whatever key you put in is no good for this function try again')
     if (xi_a==None):
         a_ind = (0,get_ind(dick,key,xf_a))
     elif (isinstance(xi_a,float)):
@@ -176,11 +180,9 @@ def height(dick,key,xf_a,xi_b,xf_b,xi_a=None,result=False):
     assert((xf_a<xi_b))
     assert(xi_b<xf_b)
     b_ind = (get_ind(dick,key,xi_b),get_ind(dick,key,xf_b))
-    if (key == key.strip('_adj')):
-        key = key + '_adj'
-    gl_avg = np.mean(dick[key][0][a_ind[0]:a_ind[1]])
+    gl_avg = np.mean(dick[key][1][a_ind[0]:a_ind[1]])
     al_avg = np.mean(dick[key][1][b_ind[0]:b_ind[1]])
-    gl_std = np.std(dick[key][0][a_ind[0]:a_ind[1]],ddof=2)
+    gl_std = np.std(dick[key][1][a_ind[0]:a_ind[1]],ddof=2)
     al_std = np.std(dick[key][1][b_ind[0]:b_ind[1]],ddof=2)
     h = al_avg - gl_avg
     pm = np.sqrt((gl_std**2)+(al_std**2))
@@ -188,11 +190,12 @@ def height(dick,key,xf_a,xi_b,xf_b,xi_a=None,result=False):
         key_plot(dick,key)
         plt.axhline(h);
         print('height of ',key,' is:',h,'+-',pm,'nm')
-    dick[key.strip('adj')+'h'] = (h,pm)
+    dick[key.strip('remadj')+'h'] = (h,pm)
     return dick
 
 def sp_analysis_hard(dick,n_samp,xf_a,xi_b,xf_b,xi_a=False):
     '''
+    NOTE: v2 exsists now, so this probs isnt as useful, not gonna get rid of it but just wanted to let you know 
     function that uses proj and height on all data sets and will average for each sample
     wont need to do all by hand but will need to look at each og data graph for values
     NOTE: for best results look at the adj data graph for input values
@@ -252,3 +255,119 @@ def sp_analysis_hard(dick,n_samp,xf_a,xi_b,xf_b,xi_a=False):
         std_arr[i] = np.sqrt(std)
         dick['s'+samp_str[1]+'avg'] = (avg_arr[i],std_arr[i])
     return dick
+
+def chauv_rem(dick,key,xf_a,xi_b,xf_b,xi_a=None):
+	'''
+	applies Chauvenet's criterion to the adjusted scan data by calculating max band D from adjusted scan data.
+	ISNT APPLIED IN 'sp_analysis_hard', saving it for new function
+	NOTE: this function will be implemented in a framework where problem children datasets are not put thru this function
+	inputs:
+	dick - dictionary - dict from which you are working from
+	key - str - data set you want to get the height from, NOTE you should have run proj for this set but just call the key 's#t#', hopefully should be able to handle it as long as it has that part in there, perfer if its: 's#t#_adj'
+	xi_a - float, default None - averages the glass height from here to xf_a, defaults to the start of the horziontal coords
+	xf_a - float - end of range of coords to avg the glass height for [microns]
+	xi_b - float - average the height of the sample (al2o3, etc.) from this coord to xf_b, start after the jump
+	xf_b - float - end of the range of sample
+	outputs:
+	returns the dictionary with a tuple (x,z) of the adjusted dataset with Chauvenet's criterion applied
+	'''
+	# basically all the framework from as the height function
+	if (xi_a==None):
+		a_ind = (0,get_ind(dick,key,xf_a))
+	elif (isinstance(xi_a,float)):
+		assert(xi_a<xf_a)
+		a_ind = (get_ind(dick,key,xi_a),get_ind(dick,key,xf_a))
+	else:
+		raise Exception('xi_a has an incorrect input')
+	assert((xf_a<xi_b))
+	assert(xi_b<xf_b)
+	b_ind = (get_ind(dick,key,xi_b),get_ind(dick,key,xf_b))
+	if (key == key.strip('_adj')):
+		key = key + '_adj'
+	# calc avg and std
+	gl_avg = np.mean(dick[key][1][a_ind[0]:a_ind[1]])
+	al_avg = np.mean(dick[key][1][b_ind[0]:b_ind[1]])
+	gl_std = np.std(dick[key][1][a_ind[0]:a_ind[1]],ddof=2)
+	al_std = np.std(dick[key][1][b_ind[0]:b_ind[1]],ddof=2)
+	# number of points
+	n_gl0 = len(dick[key][1][a_ind[0]:a_ind[1]])
+	n_al0 = len(dick[key][1][b_ind[0]:b_ind[1]])
+	# probability that this value would appear if it were a normal dist
+	gl_prob = np.array([n_gl0*spec.erfc(np.abs(dick[key][1][(a_ind[0]+i)]-gl_avg)/gl_std) for i in range(n_gl0)])
+	al_prob = np.array([n_al0*spec.erfc(np.abs(dick[key][1][(b_ind[0]+i)]-al_avg)/al_std) for i in range(n_al0)])
+	# now mask this array over the actual values and put in a new arrays
+	newkey = key.strip('adj')+'rem'
+	x1 = dick[key][0][:a_ind[0]]
+	x2 = np.array([dick[key][0][(a_ind[0]+i)] for i in range(n_gl0) if (gl_prob[i]>.5)])
+	x3 = dick[key][0][a_ind[1]:b_ind[0]]
+	x4 = np.array([dick[key][0][(b_ind[0]+i)] for i in range(n_al0) if (al_prob[i]>.5)])
+	x5 = dick[key][0][b_ind[1]:]
+	z1 = dick[key][1][:a_ind[0]]
+	z2 = np.array([dick[key][1][(a_ind[0]+i)] for i in range(n_gl0) if (gl_prob[i]>.5)])
+	z3 = dick[key][1][a_ind[1]:b_ind[0]]
+	z4 = np.array([dick[key][1][(b_ind[0]+i)] for i in range(n_al0) if (al_prob[i]>.5)])
+	z5 = dick[key][1][b_ind[1]:]
+	x_rem = np.concatenate((x1,x2,x3,x4,x5))
+	z_rem = np.concatenate((z1,z2,z3,z4,z5))
+	# return the dict
+	dick[newkey] = (x_rem,z_rem)
+	return dick
+
+def sp_analysis_v2(dick,n_samp,bad_bois,xf_a,xi_b,xf_b,xi_a=False):
+	'''
+	second iteration of our 'sp_analysis' series which goes thru all the prev functions and gives an average height
+	but now will ignore the useless data in the height calculations and can apply chauvenets criterion
+	NOTE: order of functions: projection, chauvenets, height, overall average
+	'''
+	# key names of raw data
+	bois = np.array([key for key in dick if (re.search('adj|h|_|avg|rem',key)==None)])
+	# asssert that bad_bois is an array
+	assert(isinstance(bad_bois,np.ndarray))
+	# assert that the lengths of the arrays matches so it doesnt throw any loop errors
+	assert(len(bois)==len(xf_a)==len(xi_b))
+	# now clear out the bad guys and get counts for the each sample
+	n = np.arange(1,n_samp+1)
+	n_scan = np.zeros_like(n)
+	good_dat = np.array([key for key in  dick if (np.any(bad_bois==key)==False) and (re.search('adj|h|_|avg|rem',key)==None)])
+	for i in range(len(n)):
+		a = 's'+str(n[i])
+		n_scan[i] = len(np.array([good_dat[j] for j in range(len(good_dat)) if (re.search(a,good_dat[j]))]))
+	# pipline to do the data manipulation functs
+	for i in range(len(bois)):
+		# skips over the bad datasets and still preserves the count of i
+		if (np.any(bad_bois==bois[i])):
+			continue
+		else:
+			key = bois[i]
+			if (isinstance(xi_a,bool)):
+				dick = proj(dick,key,xf_a[i])
+				dick = chauv_rem(dick,key,xf_a[i],xi_b[i],xf_b[i])
+				key += '_rem'
+				dick = height(dick,key,xf_a[i],xi_b[i],xf_b[i])
+			elif (isinstance(xi_a,float)):
+				assert(xi_a<xf_a[i])
+				dick = proj(dick,key,xf_a[i],xi=xi_a)
+				dick = chauv_rem(dick,key,xf_a[i],xi_b[i],xf_b[i],xi_a=xi_a)
+				key += '_rem'
+				dick = height(dick,key,xf_a[i],xi_b[i],xf_b[i],xi_a=xi_a)
+			elif (isinstance(xi_a,np.ndarray)):
+				assert(xi_a[i]<xf_a[i])
+				dick = proj(dick,key,xf_a[i],xi=xi_a[i])
+				dick = chauv_rem(dick,key,xf_a[i],xi_b[i],xf_b[i],xi_a=xi_a[i])
+				key += '_rem'
+				dick = height(dick,key,xf_a[i],xi_b[i],xf_b[i],xi_a=xi_a[i])
+			else:
+				raise Exception('unacceptable input for xi_a')
+	# average across the samples, replace values as they are calculated
+	for i in range(len(n)):
+		a = 's'+str(n[i])
+		s = 0.
+		std = 0.
+		h_arr = np.array([key for key in dick if (re.search('_h',key)) and (re.search(a,key))])
+		assert(len(h_arr)==n_scan[i]), 'either h was calculated for bad scans or bad scans were counted'
+		newkey = 's'+str(n[i])+'avg'
+		for j in range(len(h_arr)):
+			s += dick[h_arr[j]][0]
+			std += (dick[h_arr[j]][1])**2
+		dick[newkey] = (s/n_scan[i],np.sqrt(std))
+	return dick
