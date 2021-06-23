@@ -225,15 +225,18 @@ def sp_analysis_hard(dick,n_samp,xf_a,xi_b,xf_b,xi_a=False):
         key = bois[i]
         if (type(xi_a)==bool):
             dick = proj(dick,key,xf_a[i])
+            key += '_adj'
             dick = height(dick,key,xf_a[i],xi_b[i],xf_b[i])
         elif (type(xi_a)==float):
             assert(xi_a<xf_a[i])
             dick = proj(dick,key,xf_a[i],xi=xi_a)
+            key += '_adj'
             dick = height(dick,key,xf_a[i],xi_b[i],xf_b[i],xi_a=xi_a)
         elif (type(xi_a)==np.ndarray):
             assert(len(bois)==len(xi_a))
             assert(xi_a[i]<xf_a[i])
             dick = proj(dick,key,xf_a[i],xi=xi_a[i])
+            key += '_adj'
             dick = height(dick,key,xf_a[i],xi_b[i],xf_b[i],xi_a=xi_a[i])
         else:
             raise Exception('xi_a has incorrect input')
